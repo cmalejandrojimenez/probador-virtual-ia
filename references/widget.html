@@ -1,0 +1,105 @@
+<!--
+  PROBADOR VIRTUAL CON IA — Widget embebible (vanilla, sin dependencias, sin claves).
+  Pega este bloque donde el CMS renderiza la página de producto.
+  Configura TRYON abajo. La imagen de la prenda puede venir de:
+    (a) TRYON.GARMENT_IMG  o  (b) el atributo data-garment del contenedor.
+-->
+<div id="tryon-root" data-garment="" data-product=""></div>
+<script>
+(function(){
+  var TRYON = {
+    WORKER_URL: "https://TU-worker.workers.dev", // <-- tu Cloudflare Worker
+    GARMENT_IMG: "",   // URL https de la prenda (o usa data-garment en #tryon-root)
+    PRODUCT: "",       // nombre/handle del producto (registro de consentimiento)
+    POLICY_URL: "/pages/politica-datos", // enlace a tu política de datos
+    PRIMARY: "#0A0908", ACCENT: "#B89150", CREAM: "#F7F4ED" // colores (ajustables)
+  };
+
+  function normUrl(u){ if(!u) return u; u=String(u).trim();
+    if(u.indexOf("//")===0) return "https:"+u;
+    if(u.indexOf("http://")===0) return "https://"+u.slice(7); return u; }
+
+  var root = document.getElementById("tryon-root");
+  var garment = normUrl(TRYON.GARMENT_IMG || (root && root.getAttribute("data-garment")) || "");
+  var product = TRYON.PRODUCT || (root && root.getAttribute("data-product")) || "";
+
+  var css = ""
+    + "#tryon-root *{box-sizing:border-box;font-family:inherit}"
+    + ".tryon-cta{display:flex;align-items:stretch;gap:1rem;width:100%;min-height:78px;margin-top:1.2rem;border:1.5px solid "+TRYON.ACCENT+";background:"+TRYON.PRIMARY+";cursor:pointer;overflow:hidden;text-align:left;transition:.3s}"
+    + ".tryon-cta:hover{transform:translateY(-1px)}"
+    + ".tryon-cta .ic{width:68px;flex:none;display:flex;align-items:center;justify-content:center;background:"+TRYON.ACCENT+";color:"+TRYON.PRIMARY+";font-size:1.9rem}"
+    + ".tryon-cta .tx{flex:1;min-width:0;padding:1rem 1.1rem;display:flex;flex-direction:column;justify-content:center}"
+    + ".tryon-cta .tx b{font-weight:700;font-size:.92rem;letter-spacing:.14em;text-transform:uppercase;color:#fff}"
+    + ".tryon-cta .tx small{font-style:italic;font-size:1.1rem;color:"+TRYON.ACCENT+";margin-top:3px}"
+    + ".tryon-ov{position:fixed;inset:0;background:rgba(10,9,8,.86);z-index:99999;display:none;align-items:center;justify-content:center;padding:1rem}"
+    + ".tryon-ov.on{display:flex}"
+    + ".tryon-modal{background:"+TRYON.CREAM+";max-width:560px;width:100%;max-height:92vh;overflow:auto;padding:1.8rem;position:relative}"
+    + ".tryon-x{position:absolute;top:.8rem;right:1rem;background:none;border:none;font-size:1.6rem;cursor:pointer;color:"+TRYON.PRIMARY+"}"
+    + ".tryon-modal h3{margin:.2rem 0 1rem;font-size:1.4rem;color:"+TRYON.PRIMARY+"}"
+    + ".tryon-drop{border:1.5px dashed "+TRYON.ACCENT+";padding:1.4rem;text-align:center;cursor:pointer;color:"+TRYON.PRIMARY+"}"
+    + ".tryon-consent{font-size:.85rem;color:#3D3935;margin:1rem 0;display:flex;gap:.5rem;align-items:flex-start}"
+    + ".tryon-btn{width:100%;padding:.9rem;background:"+TRYON.PRIMARY+";color:#fff;border:none;cursor:pointer;letter-spacing:.12em;text-transform:uppercase;font-size:.8rem}"
+    + ".tryon-btn:disabled{opacity:.4;cursor:not-allowed}"
+    + ".tryon-frame img{width:100%;display:block;max-height:78vh;object-fit:contain;background:"+TRYON.CREAM+"}"
+    + ".tryon-err{color:#5C1F28;font-size:.85rem;margin-top:.6rem}";
+  var st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
+
+  root.innerHTML = '<button class="tryon-cta" type="button" id="tryon-open">'
+    + '<span class="ic">&#10022;</span>'
+    + '<span class="tx"><b>Pruébala en ti</b><small>Vístela con IA · sube tu foto</small></span></button>';
+
+  var ov = document.createElement("div"); ov.className="tryon-ov";
+  ov.innerHTML = '<div class="tryon-modal"><button class="tryon-x" id="tryon-x">&times;</button>'
+    + '<div id="tryon-step1"><h3>Pruébala en ti</h3>'
+    + '<label class="tryon-drop" id="tryon-drop">Sube o toma una foto de cuerpo entero, de frente.<br><input id="tryon-file" type="file" accept="image/*" capture="user" style="display:none"></label>'
+    + '<label class="tryon-consent"><input type="checkbox" id="tryon-c1"> <span>Autorizo el tratamiento de mi imagen para generar esta vista previa, conforme a la <a href="'+TRYON.POLICY_URL+'" target="_blank">política de datos</a>.</span></label>'
+    + '<label class="tryon-consent"><input type="checkbox" id="tryon-c2"> <span>(Opcional) Autorizo el uso de mi imagen con fines de marketing de la marca.</span></label>'
+    + '<button class="tryon-btn" id="tryon-go" disabled>Generar mi vista previa</button>'
+    + '<div class="tryon-err" id="tryon-err"></div></div>'
+    + '<div id="tryon-step2" style="display:none;text-align:center;padding:2rem 0">Generando tu imagen… puede tomar unos segundos.</div>'
+    + '<div id="tryon-step3" style="display:none"><div class="tryon-frame"><img id="tryon-out" alt=""></div>'
+    + '<button class="tryon-btn" id="tryon-again" style="margin-top:1rem">Probar otra foto</button></div></div>';
+  document.body.appendChild(ov);
+
+  var photoData = null;
+  var $ = function(id){return document.getElementById(id);};
+  function show(step){ $("tryon-step1").style.display=step===1?"block":"none";
+    $("tryon-step2").style.display=step===2?"block":"none";
+    $("tryon-step3").style.display=step===3?"block":"none"; }
+  function syncBtn(){ $("tryon-go").disabled = !(photoData && $("tryon-c1").checked); }
+
+  $("tryon-open").onclick=function(){ ov.classList.add("on"); show(1); };
+  $("tryon-x").onclick=function(){ ov.classList.remove("on"); };
+  $("tryon-drop").onclick=function(){ $("tryon-file").click(); };
+  $("tryon-c1").onchange=syncBtn;
+  $("tryon-again").onclick=function(){ photoData=null; $("tryon-file").value=""; show(1); syncBtn(); };
+
+  // Resize a JPEG <=1280px (arregla HEIC/fotos pesadas de móvil)
+  $("tryon-file").onchange=function(e){
+    var f=e.target.files[0]; if(!f) return;
+    var img=new Image(), url=URL.createObjectURL(f);
+    img.onload=function(){
+      var max=1280, w=img.width, h=img.height, s=Math.min(1,max/Math.max(w,h));
+      var c=document.createElement("canvas"); c.width=Math.round(w*s); c.height=Math.round(h*s);
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+      photoData=c.toDataURL("image/jpeg",0.9); URL.revokeObjectURL(url);
+      $("tryon-drop").innerHTML="Foto lista ✓ — toca aquí para cambiarla<input id=\"tryon-file\" type=\"file\" accept=\"image/*\" capture=\"user\" style=\"display:none\">";
+      $("tryon-drop").querySelector("input").onchange=arguments.callee; // re-bind
+      syncBtn();
+    };
+    img.src=url;
+  };
+
+  $("tryon-go").onclick=function(){
+    if(!photoData) return;
+    $("tryon-err").textContent=""; show(2);
+    fetch(TRYON.WORKER_URL,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ photo:photoData, garmentImage:garment, productHandle:product,
+        productTitle:document.title, consent:$("tryon-c1").checked, marketingOptIn:$("tryon-c2").checked })})
+    .then(function(r){return r.json();})
+    .then(function(d){ if(d&&d.ok&&d.image){ $("tryon-out").src=d.image; show(3); }
+      else { show(1); $("tryon-err").textContent=(d&&d.error)||"No se pudo generar. Intenta de nuevo."; } })
+    .catch(function(){ show(1); $("tryon-err").textContent="Error de conexión. Intenta de nuevo."; });
+  };
+})();
+</script>
